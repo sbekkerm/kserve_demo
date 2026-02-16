@@ -2,7 +2,7 @@
 apiVersion: serving.kserve.io/v1alpha2
 kind: LLMInferenceServiceConfig
 metadata:
-  name: llmisvc-inf-scheduler
+  name: llmisvc-intelligent-inference-scheduling
   namespace: kserve-lab
 spec:
   template:
@@ -22,26 +22,8 @@ spec:
             --port 8000
             --disable-uvicorn-access-log
             --disable-log-requests
-            --prefix-caching-hash-algo sha256_cbor
-            --block-size 64
-            --kv_transfer_config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
-            --kv-events-config "$KV_EVENTS_CONFIG"
             $VLLM_ADDITIONAL_ARGS
         env:
-          - name: KV_EVENTS_CONFIG
-            value: |
-              {
-                "enable_kv_cache_events": true,
-                "publisher": "zmq",
-                "endpoint": "tcp://{{ ChildName .ObjectMeta.Name `-epp-service` }}.{{ .ObjectMeta.Namespace }}.svc.cluster.local:5557",
-                "topic": "kv@$(POD_IP)@{{ .Spec.Model.Name }}"
-              }
-          - name: POD_IP
-            valueFrom:
-              fieldRef:
-                fieldPath: status.podIP
-          - name: PYTHONHASHSEED
-            value: "42"
           - name: HOME
             value: /home
           - name: VLLM_LOGGING_LEVEL
@@ -100,6 +82,15 @@ spec:
       - name: tls-certs
         secret:
           secretName: "{{ ChildName .ObjectMeta.Name `-kserve-self-signed-certs` }}"
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                    - worker-gpu2
   router:
     scheduler:
       pool:
@@ -133,11 +124,6 @@ spec:
                 protocol: TCP
             image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.5.0
             imagePullPolicy: IfNotPresent
-            env:
-              - name: HF_HOME
-                value: /mnt/tokenizers
-              - name: TMPDIR
-                value: /mnt/tokenizers
             livenessProbe:
               failureThreshold: 3
               grpc:
@@ -167,74 +153,25 @@ spec:
               - "9002"
               - --grpc-health-port
               - "9003"
+              - --kv-cache-usage-percentage-metric
+              - "vllm:kv_cache_usage_perc"
+              - --metrics-endpoint-auth=false
               - --secure-serving
               - --cert-path
               - /etc/ssl/certs
-              - --metrics-endpoint-auth=false
-              - --config-text
-              - |
-                apiVersion: inference.networking.x-k8s.io/v1alpha1
-                kind: EndpointPickerConfig
-                plugins:
-                  - type: single-profile-handler
-                  - type: precise-prefix-cache-scorer
-                    parameters:
-                      kvEventsConfig:
-                        zmqEndpoint: "tcp://*:5557"
-                      indexerConfig:
-                        tokenProcessorConfig:
-                          blockSize: 64
-                          hashSeed: "42"
-                        kvBlockIndexConfig:
-                          enableMetrics: true
-                          metricsLoggingInterval: 60000000000
-                        tokenizersPoolConfig:
-                          modelName: "{{ .Spec.Model.Name }}"
-                          tokenizersCacheDir: "/mnt/tokenizers"
-                  - type: queue-scorer
-                  - type: kv-cache-utilization-scorer
-                  - type: max-score-picker
-                schedulingProfiles:
-                  - name: default
-                    plugins:
-                      - pluginRef: queue-scorer
-                        weight: 2
-                      - pluginRef: kv-cache-utilization-scorer
-                        weight: 2
-                      - pluginRef: precise-prefix-cache-scorer
-                        weight: 3
-                      - pluginRef: max-score-picker
-            resources:
-              requests:
-                cpu: 256m
-                memory: 500Mi
-            terminationMessagePath: /dev/termination-log
-            terminationMessagePolicy: FallbackToLogsOnError
-            securityContext:
-              allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: true
-              runAsNonRoot: true
-              capabilities:
-                drop:
-                  - ALL
-              seccompProfile:
-                type: RuntimeDefault
-            volumeMounts:
-              - mountPath: /etc/ssl/certs
-                name: tls-certs
-                readOnly: true
-              - mountPath: /mnt/tokenizers
-                name: tokenizers
-              - mountPath: /go
-                name: go-cache
         volumes:
           - name: tls-certs
             secret:
               secretName: "{{ ChildName .ObjectMeta.Name `-kserve-self-signed-certs` }}"
-          - name: tokenizers
-            emptyDir: {}
-          - name: go-cache
-            emptyDir: {}
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/hostname
+                      operator: In
+                      values:
+                        - worker-gpu2
         dnsPolicy: ClusterFirst
         restartPolicy: Always
         terminationGracePeriodSeconds: 30

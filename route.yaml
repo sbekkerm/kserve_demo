@@ -19,7 +19,7 @@ spec:
       backendRefs:
         - group: inference.networking.k8s.io
           kind: InferencePool
-          name: gpt-oss-20b-inf-scheduler-inference-pool
+          name: gpt-oss-20b-inference-pool
           namespace: kserve-lab
       timeouts:
         request: 60s

@@ -2,7 +2,7 @@
 apiVersion: serving.kserve.io/v1alpha2
 kind: LLMInferenceService
 metadata:
-  name: gpt-oss-20b-inf-scheduler
+  name: gpt-oss-20b
   namespace: kserve-lab
 spec:
   model:
@@ -13,7 +13,7 @@ spec:
     scheduler: { }
     gateway: { }
   baseRefs:
-    - name: llmisvc-inf-scheduler
+    - name: llmisvc-prefix-caching
   template:
     containers:
       - name: main
